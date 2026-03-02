@@ -49,7 +49,13 @@ if __name__ == "__main__":
 
 
         ray_origin = torch.tensor([2, 2, 2]).ravel()
-        normals = EvalSH.make_normals(front_facing_points, ray_origin, k=k)
+
+        # Move inputs to CUDA for testing.
+        # TODO: might be nice to use the openreg / meta backend for testing: https://github.com/pytorch/pytorch/issues/61654#issuecomment-879989145 and https://github.com/pytorch/pytorch/pull/155101#discussion_r2144157203
+        device = torch.device("cuda")
+
+        normals = EvalSH.make_normals(front_facing_points.to(device), ray_origin.to(device), k=k)
+        normals = normals.cpu()
         # Plot output normals:
         # https://matplotlib.org/stable/gallery/mplot3d/quiver3d.html
         ax.quiver3D(front_facing_points[:, 0], front_facing_points[:, 1], front_facing_points[:, 2], normals[:, 0], normals[:, 1], normals[:, 2], length = 0.1, cmap='tab10', arrow_length_ratio=.4)
