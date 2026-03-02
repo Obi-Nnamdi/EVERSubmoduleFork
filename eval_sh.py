@@ -99,17 +99,20 @@ class EvalSH(Function):
         kd_tree_build_time = time.perf_counter()
         print(f"Took {kd_tree_build_time - cpu_transfer_time}s for KDTree Building.")
 
-        # Find the k-nearest neighbors. We'll always get each point as it's closest nearest neighbor, so ask for one more.
+        # Find the k-nearest neighbors. We'll always get each point as its closest nearest neighbor, so ask for one more.
         _, point_idxs = kd_tree.query(cpu_means, k=(k + 1))
+        
         kd_tree_query_time = time.perf_counter()
         print(f"Took {kd_tree_query_time - kd_tree_build_time}s for KDTree Querying.")
-        
-        k_nearest_points = cpu_means[point_idxs] # (n, k + 1, 3)
 
         # Do PCA on k-nearest neighbors
         # https://docs.pytorch.org/docs/stable/generated/torch.pca_lowrank.html
         # Note that this is slightly non-deterministic.
-        _, S, V = torch.pca_lowrank(k_nearest_points) # S has shape (n, 3). V has shape (n, 3, 3)
+        k_nearest_points = cpu_means[point_idxs] # (n, k + 1, 3)
+        _, _, V = torch.pca_lowrank(k_nearest_points) # S has shape (n, 3). V has shape (n, 3, 3)
+        
+        # Through testing, putting this on GPU is actually not that fast unfortunately.
+        # Currently CPU-only.
 
         pca_time = time.perf_counter()
         print(f"Took {pca_time - kd_tree_query_time}s for PCA.")

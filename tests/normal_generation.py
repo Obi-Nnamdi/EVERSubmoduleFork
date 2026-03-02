@@ -12,16 +12,16 @@ import matplotlib.pyplot as plt
 
 if __name__ == "__main__":
     with torch.no_grad():
-        print("Testing Normal Creation:")
         num_points = 40
         dim = 3
         k = 4
+        box_size = 1
+        box_points = 1000
+        print(f"Testing Normal Creation ({k = }, {box_points = }):")
 
         test_means = torch.rand(num_points, 3)
 
         # Create a box point cloud to test our normal effectiveness:
-        box_size = 1
-        box_points = 20
         plane_points = torch.linspace(-box_size, box_size, box_points)
 
         box_volume_points = torch.cartesian_prod(plane_points, plane_points, plane_points) # (box_points**3 x 3)
@@ -36,17 +36,12 @@ if __name__ == "__main__":
 
 
         ax.scatter(front_facing_points[:, 0], front_facing_points[:, 1], front_facing_points[:, 2], marker="o", c=front_facing_points[:, 2], cmap='tab10')
-        ax.set_title("Generated Normals")
-        # ax.view_init(elev=30, azim=20, roll=0)
+        ax.set_title(f"Generated Normals ({k = }, {box_points = })")
 
-        # ax.plot_trisurf(box_boundary_points[:, 0], box_boundary_points[:, 1], box_boundary_points[:, 2], linewidth=0.1)
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
         ax.invert_yaxis()
-
-        
-
 
         ray_origin = torch.tensor([2, 2, 2]).ravel()
 
