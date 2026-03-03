@@ -23,7 +23,9 @@ void sh_kernel(
     TensorView<float> features,
     TensorView<float> ray_origin,
     TensorView<float> colors,
-    uint sh_degree)
+    TensorView<float> normals,
+    uint sh_degree,
+    uint time_step)
 {
     uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
     uint prim_ind = dispatchIdx.x;
@@ -36,7 +38,25 @@ void sh_kernel(
     // First, check
     float3 dir_pp = normalize(mean - rayo);
     Features feat = get_feats(features, prim_ind, sh_degree);
-    float3 color = eval_color(dir_pp, feat, sh_degree);
+    
+    // Evaluate time
+    uint frame_loop_time = 100; // Loop lighting times every 100 frames
+    float t = (time_step % frame_loop_time) / ((float) frame_loop_time - 1); // (0 -> 1)
+    
+    
+    // float3 base_color = eval_color(dir_pp, feat, sh_degree);
+    float3 base_color = t; // black -> white
+
+    float3 light_dir = { 0, 0, 1 };
+    float3 normal_dir = get_float3(normals, prim_ind); // TODO: Get Normals.
+
+    // float3 color = dot(normal_dir, light_dir) * base_color;
+    // float3 color = (dot(normal_dir, light_dir) / 2) + 0.5;
+
+    float3 color = abs(dot(normal_dir, light_dir)) * base_color;
+    // Debug view of normals:
+    // float3 color = (normal_dir / 2) + 0.5; // [0-1] on rgb (xyz)
+
     colors[prim_ind, 0] = color.x;
     colors[prim_ind, 1] = color.y;
     colors[prim_ind, 2] = color.z;

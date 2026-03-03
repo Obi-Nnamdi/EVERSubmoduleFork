@@ -37,7 +37,8 @@ class EvalSH(Function):
         features: torch.Tensor,
         rayo: torch.Tensor,
         sh_degree: int,
-        normals:Optional[torch.Tensor] = None
+        normals: Optional[torch.Tensor] = None,
+        time_step: Optional[int] = None
     ):
         block_size = 64
         rayo = rayo.reshape(3).contiguous()
@@ -59,7 +60,7 @@ class EvalSH(Function):
         ctx.sh_degree = sh_degree
         num_prim = means.shape[0]
         kernels.sh_kernel(
-            means=means, features=features, ray_origin=rayo, colors=color, sh_degree=sh_degree, normals=normals
+            means=means, features=features, ray_origin=rayo, colors=color, sh_degree=sh_degree, normals=normals, time_step=time_step
         ).launchRaw(
             blockSize=(block_size, 1, 1),
             gridSize=(num_prim // block_size + 1, 1, 1),
@@ -168,13 +169,15 @@ def eval_sh(
         features,
         rayo,
         sh_degree,
-        normals = None):
+        normals = None,
+        time_step = None):
     out = EvalSH.apply(
         means,
         features,
         rayo,
         sh_degree,
-        normals
+        normals,
+        time_step
     )
     return out
 
