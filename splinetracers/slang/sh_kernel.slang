@@ -44,8 +44,8 @@ void sh_kernel(
     float t = (time_step % frame_loop_time) / ((float) frame_loop_time - 1); // (0 -> 1)
     
     
-    // float3 base_color = eval_color(dir_pp, feat, sh_degree);
-    float3 base_color = t; // black -> white
+    float3 base_color = eval_color(dir_pp, feat, sh_degree);
+    // float3 base_color = t; // black -> white
 
     float3 light_dir = { 0, 0, 1 };
     float3 normal_dir = get_float3(normals, prim_ind); // TODO: Get Normals.
@@ -53,7 +53,10 @@ void sh_kernel(
     // float3 color = dot(normal_dir, light_dir) * base_color;
     // float3 color = (dot(normal_dir, light_dir) / 2) + 0.5;
 
-    float3 color = abs(dot(normal_dir, light_dir)) * base_color;
+    float normal_alignment = abs(dot(normal_dir, light_dir));
+    float light_power = lerp(normal_alignment, 1, t);
+
+    float3 color = light_power * base_color;
     // Debug view of normals:
     // float3 color = (normal_dir / 2) + 0.5; // [0-1] on rgb (xyz)
 
