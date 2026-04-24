@@ -93,6 +93,8 @@ class FastRenderer:
             ).reshape(shs.shape)
 
         cam_pos = view.camera_center.to(self.device)
+        # Wild hack: basically renders the gaussians once then just passes those colors
+        # back to the raytracer to be rendered quickly as base spherical harmonics.
         net_color = eval_sh2(self.pc.get_xyz, shs, cam_pos, self.pc.active_sh_degree)
         net_color = torch.nn.functional.softplus(net_color, beta=10)
         features = RGB2SH(net_color).reshape(-1, 1, 3)

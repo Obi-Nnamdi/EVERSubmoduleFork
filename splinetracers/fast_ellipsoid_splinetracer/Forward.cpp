@@ -70,6 +70,7 @@ void Forward::trace_rays(
     CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(d_param), &params,
                           sizeof(params), cudaMemcpyHostToDevice));
     if (camera != NULL) {
+      // Where everything happens
       OPTIX_CHECK(optixLaunch(pipeline, stream, d_param, sizeof(Params), &sbt,
                               camera->width, camera->height, 1));
     } else {
@@ -158,7 +159,7 @@ Forward::Forward(const OptixDeviceContext &context, int8_t device,
   }
   //
   // Link pipeline
-  //
+  // (where pipeline is created from nullptr)
   {
     const uint32_t max_trace_depth = 1;
     OptixProgramGroup program_groups[] = {raygen_prog_group, miss_prog_group,

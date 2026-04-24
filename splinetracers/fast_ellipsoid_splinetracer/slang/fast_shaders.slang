@@ -177,6 +177,7 @@ void rg_float()
     const uint3 dim = DispatchRaysDimensions();
     float3 direction = l2_normalize(ray_directions[idx.x]);
     float3 origin = ray_origins[idx.x] + tmin * ray_directions[idx.x];
+    // This is where we start tracking an empty state for a ray.
     SplineState state = make_empty_state();
     state.t = 0;
     state.drgb = initial_drgb[idx.x];
@@ -218,6 +219,7 @@ void rg_float()
                 end = true;
                 break;
             }
+            // Is this where the rendering logic lives? This update seems to be where colors get updated.
             ctrl_pt = get_ctrl_pt(tri, ctrl_pt.t);
             state = update(state, ctrl_pt, tmin, tmax, max_prim_size);
             iter++;
@@ -226,6 +228,7 @@ void rg_float()
         if (end) break;
 
     }
+    // Final clean up after everything's traced and populating the float image with the color.
     let output = extract_color(state, tmin);
     fimage[idx.x] = {output.C.x, output.C.y, output.C.z, output.depth};
     let dual_state = to_dual(state, ctrl_pt);

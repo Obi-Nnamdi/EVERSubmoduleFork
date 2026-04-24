@@ -40,29 +40,58 @@ void sh_kernel(
     Features feat = get_feats(features, prim_ind, sh_degree);
     
     // Evaluate time
-    uint frame_loop_time = 100; // Loop lighting times every 100 frames
+    uint frame_loop_time = 60; // Loop lighting times every 100 frames
     float t = (time_step % frame_loop_time) / ((float) frame_loop_time - 1); // (0 -> 1)
     
     
-    float3 base_color = eval_color(dir_pp, feat, sh_degree);
+    // float3 base_color = eval_color(dir_pp, feat, sh_degree);
+    // float3 base_color = {0.878, 0.867, 0.133};
+    float3 base_color = {0, 0, 1};
     // float3 base_color = t; // black -> white
 
-    float3 light_dir = { 0, 0, 1 };
-    float3 normal_dir = get_float3(normals, prim_ind); // TODO: Get Normals.
+    // float3 light_dir = { 0, 0, 1 };
+    float3 light_dir = normalize(float3(sin(t * 2 * float.getPi()), cos(t * 2 * float.getPi()), 1));
+
+    float3 normal_dir = get_float3(normals, prim_ind);
 
     // float3 color = dot(normal_dir, light_dir) * base_color;
     // float3 color = (dot(normal_dir, light_dir) / 2) + 0.5;
 
     float normal_alignment = abs(dot(normal_dir, light_dir));
-    float light_power = lerp(normal_alignment, 1, t);
 
-    float3 color = light_power * base_color;
+    float3 view_dir = normalize(rayo - mean);
+
+    // float3 color = normal_alignment * base_color;
+    float3 color = phong_shade(mean, normal_dir, light_dir, rayo, base_color, 32, 0.04);
     // Debug view of normals:
     // float3 color = (normal_dir / 2) + 0.5; // [0-1] on rgb (xyz)
 
     colors[prim_ind, 0] = color.x;
     colors[prim_ind, 1] = color.y;
     colors[prim_ind, 2] = color.z;
+}
+
+// TODO: Turn into a Struct?
+float3 phong_shade(float3 pos, float3 normal, float3 lightDir, float3 viewPos, float3 baseColor, float specExp, float ambientLight) {
+    // From https://learnopengl.com/code_viewer_gh.php?code=src/5.advanced_lighting/1.advanced_lighting/1.advanced_lighting.fs
+    float3 ambientColor = ambientLight * baseColor;
+
+    // Diffuse
+    float diffFactor = max(dot(lightDir, normal), 0.0);
+    float3 diffuseColor = diffFactor * baseColor;
+
+    // Specular
+    float3 view_dir = normalize(viewPos - pos);
+    float3 reflectDir = reflect(-lightDir, normal);
+
+    // Blinn-Phong Model
+    float3 halfwayDir = normalize(lightDir + view_dir);
+    float specFactor = pow(max(dot(normal, halfwayDir), 0.0), specExp);
+
+    float specColor = 0.3;
+    float3 specularColor = float3(specColor) * specFactor;
+
+    return ambientColor + diffuseColor + specularColor;
 }
 
 [AutoPyBindCUDA]

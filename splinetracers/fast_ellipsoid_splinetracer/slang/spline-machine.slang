@@ -24,7 +24,7 @@ struct SplineState : IDifferentiable
   float3 padding;
   // Spline state
   float t;
-  float4 drgb;
+  float4 drgb; // density, rgb?
 
   // Volume Rendering State
   float logT;
