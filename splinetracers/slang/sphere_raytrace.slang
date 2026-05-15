@@ -4,6 +4,10 @@ import sh;
 
 [AutoPyBindCUDA]
 [CUDAKernel]
+/**
+    Intersect a group of rays with a sphere,
+    returning the t_min of each ray that hits it (and the normal)
+*/
 void intersect_sphere(
     TensorView<float> ray_origins,
     TensorView<float> ray_directions,
@@ -73,4 +77,48 @@ void intersect_sphere(
 
     // Set values properly:
     T_values[prim_ind, 0] = chosen_t;
+}
+
+[AutoPyBindCUDA]
+[CUDAKernel]
+// Returns bounce_ray_o and bounce_ray_d's for intersections with spheres with incoming rays at the given t_vals.
+void bounce_off_sphere(
+    TensorView<float> ray_origins,
+    TensorView<float> ray_directions,
+    TensorView<float> sphere_center,
+    TensorView<float> T_values,
+    TensorView<float> bounce_ray_origins,
+    TensorView<float> bounce_ray_directions,
+)
+{
+    // Initial setup
+    uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
+    uint pixel_ind = dispatchIdx.x;
+
+    // Coerce variables to standard representations
+    if (pixel_ind >= ray_origins.size(0)) {
+        return;
+    }
+
+    float3 ray_o = get_float3(ray_origins, pixel_ind);
+    float3 ray_d = get_float3(ray_directions, pixel_ind);
+    float3 sphere_c = get_float3(sphere_center, 0);
+    float hit_t = T_values[pixel_ind, 0];
+
+    // Only process things that got hit.
+    if (isinf(hit_t)) {
+        return;
+    }
+
+    float3 hit_pos = ray_o + ray_d * hit_t;
+
+    // Sphere normal calculation
+    float3 hit_normal = normalize(hit_pos - sphere_c);
+
+    // Reflect rays on normal
+    float3 bounce_d = reflect(ray_d, hit_normal);
+
+    // Populate tensor values
+    set_float3(bounce_ray_origins, pixel_ind, hit_pos);
+    set_float3(bounce_ray_directions, pixel_ind, bounce_d);
 }
