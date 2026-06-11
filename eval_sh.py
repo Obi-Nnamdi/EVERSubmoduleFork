@@ -70,7 +70,7 @@ class EvalSH(Function):
             means, features, rayo, color
         )
         return color
-    
+
     @staticmethod
     def make_normals(means: torch.Tensor, ray_origin: torch.Tensor, k:int = 3) -> torch.Tensor:
         """
@@ -92,17 +92,17 @@ class EvalSH(Function):
         start_time = time.perf_counter()
         cpu_means = means.cpu().detach()
         cpu_ray_origin = ray_origin.cpu().detach()
-        
+
         cpu_transfer_time = time.perf_counter()
         print(f"Took {cpu_transfer_time - start_time}s for CPU tensor transfer")
-        
+
         kd_tree = KDTree(cpu_means)
         kd_tree_build_time = time.perf_counter()
         print(f"Took {kd_tree_build_time - cpu_transfer_time}s for KDTree Building.")
 
         # Find the k-nearest neighbors. We'll always get each point as its closest nearest neighbor, so ask for one more.
         _, point_idxs = kd_tree.query(cpu_means, k=(k + 1))
-        
+
         kd_tree_query_time = time.perf_counter()
         print(f"Took {kd_tree_query_time - kd_tree_build_time}s for KDTree Querying.")
 
@@ -111,7 +111,7 @@ class EvalSH(Function):
         # Note that this is slightly non-deterministic.
         k_nearest_points = cpu_means[point_idxs] # (n, k + 1, 3)
         _, _, V = torch.pca_lowrank(k_nearest_points) # S has shape (n, 3). V has shape (n, 3, 3)
-        
+
         # Through testing, putting this on GPU is actually not that fast unfortunately.
         # Currently CPU-only.
 
@@ -128,7 +128,7 @@ class EvalSH(Function):
         print(f"Took {cross_time - pca_time}s for Crossing x and ys.")
 
         normals = EvalSH.orient_normals(normals, cpu_means, cpu_ray_origin)
-        
+
         flip_time = time.perf_counter()
         print(f"Took {flip_time - cross_time}s to flip normals properly.")
 
@@ -164,20 +164,9 @@ class EvalSH(Function):
         )
         return None, dL_dfeat, None, None, None
 
-def eval_sh(
-        means,
-        features,
-        rayo,
-        sh_degree,
-        normals = None,
-        time_step = None):
-    out = EvalSH.apply(
-        means,
-        features,
-        rayo,
-        sh_degree,
-        normals,
-        time_step
-    )
-    return out
 
+def eval_sh(
+    means, features, rayo, sh_degree, normals=None, time_step=None
+) -> torch.Tensor:
+    out = EvalSH.apply(means, features, rayo, sh_degree, normals, time_step)
+    return out
