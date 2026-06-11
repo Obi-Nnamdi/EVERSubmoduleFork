@@ -61,7 +61,7 @@ RWStructuredBuffer<float4> initial_drgb;
 float max_prim_size;
 RaytracingAccelerationStructure traversable;
 
-
+// TODO: Make same change to get_ctrl_pt as in fast_shaders.slang for the backwards_differentiable pipeliene?
 ControlPoint get_ctrl_pt(uint tri, float t) {
     ControlPoint ctrl_pt;
     let prim_ind = tri / 2;

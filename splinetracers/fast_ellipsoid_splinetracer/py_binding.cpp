@@ -134,6 +134,10 @@ public:
     CHECK_FLOAT_DIM3(colors);
     TORCH_CHECK(colors.size(0) == model.num_prims,
                 "All inputs (colors) must have the same 0 dimension");
+
+    // Regenerate model feature size every time we get a new batch of features
+    // (accomodating different SH degrees for the same primitives)
+    model.feature_size = colors.size(1);
     model.features = reinterpret_cast<float *>(colors.data_ptr());
   }
 };
@@ -206,6 +210,8 @@ public:
         sh_degree(sqrt(model.model.feature_size) - 1) {}
   void update_model(const fesPyPrimitives &model) {
     forward.reset_features(model.model);
+    // Reset SH Degree pointer
+    sh_degree = sqrt(model.model.feature_size) - 1;
   }
   py::dict trace_rays(const fesPyGas &gas, const torch::Tensor &ray_origins,
                       const torch::Tensor &ray_directions, float tmin,
@@ -215,6 +221,7 @@ public:
     CHECK_FLOAT_DIM3(ray_origins);
     CHECK_FLOAT_DIM3(ray_directions);
     const size_t num_rays = ray_origins.numel() / 3;
+    // Build the "fimage" input that's updated in fast_shaders.slang
     torch::Tensor color;
     color = torch::zeros({(long)num_rays, 4},
                          torch::device(device).dtype(torch::kFloat32));
@@ -249,7 +256,7 @@ public:
                        reinterpret_cast<int *>(tri_collection.data_ptr()),
                        reinterpret_cast<int *>(initial_touch_count.data_ptr()),
                        reinterpret_cast<int *>(initial_touch_inds.data_ptr()));
-    return py::dict("color"_a = color,
+    return py::dict("color"_a = color,  //_a is the "arg" literal for pybind
                     "saved"_a = saved_for_backward,
                     "tri_collection"_a = tri_collection,
                     "initial_drgb"_a = initial_drgb,

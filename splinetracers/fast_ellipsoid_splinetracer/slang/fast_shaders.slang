@@ -32,6 +32,7 @@ struct Camera {
 };
 
 // LaunchParams
+// Matches params in Forward.h
 RWStructuredBuffer<uint>        image;
 RWStructuredBuffer<float4>      fimage;
 RWStructuredBuffer<uint>        iters;
@@ -72,6 +73,50 @@ ControlPoint get_ctrl_pt(uint tri, float t) {
     feat.f0 = get_sh(sh_feats, 0);
     float3 rayd = {0, 0, 1};
     let color = eval_sh_col0(rayd, feat);
+    ctrl_pt.t = t;
+    ctrl_pt.dirac.x = dirac_height;
+    ctrl_pt.dirac.y = dirac_height * color.x;
+    ctrl_pt.dirac.z = dirac_height * color.y;
+    ctrl_pt.dirac.w = dirac_height * color.z;
+    return ctrl_pt;
+}
+
+// Actually render all the spherical harmonics.
+ControlPoint get_ctrl_pt_complex(uint tri, float t, float3 rayd) {
+    ControlPoint ctrl_pt;
+    let prim_ind = tri / 2;
+    let hitkind = tri % 2;
+    let height = heights[prim_ind];
+    let dirac_height = height * ((hitkind == 1) ? 1 : -1);
+    Features feat;
+    SHFeatures sh_feats = { prim_ind, sh_degree, features };
+
+    // Populate all features
+    // TODO: A nicer way to clean this code up
+    feat.f0 = get_sh(sh_feats, 0);
+    feat.f1 = get_sh(sh_feats, 1);
+    feat.f2 = get_sh(sh_feats, 2);
+    feat.f3 = get_sh(sh_feats, 3);
+    feat.f4 = get_sh(sh_feats, 4);
+    feat.f5 = get_sh(sh_feats, 5);
+    feat.f6 = get_sh(sh_feats, 6);
+    feat.f7 = get_sh(sh_feats, 7);
+    feat.f8 = get_sh(sh_feats, 8);
+    feat.f9 = get_sh(sh_feats, 9);
+    feat.f10 = get_sh(sh_feats, 10);
+    feat.f11 = get_sh(sh_feats, 11);
+    feat.f12 = get_sh(sh_feats, 12);
+    feat.f13 = get_sh(sh_feats, 13);
+    feat.f14 = get_sh(sh_feats, 14);
+    feat.f15 = get_sh(sh_feats, 15);
+
+    // let color = eval_sh_col0(rayd, feat);
+    let sh_result = eval_color(rayd, feat, sh_feats.max_deg);
+
+    // TODO: I believe colors should always be softplussed before being traced with (as done in get_color inside FastRenderer.)
+    // TODO: Add a parameter that lets this softplus be turned off (if this is called with precomputed SHs.)
+    let color = softplus(sh_result, 10);
+
     ctrl_pt.t = t;
     ctrl_pt.dirac.x = dirac_height;
     ctrl_pt.dirac.y = dirac_height * color.x;
@@ -219,8 +264,9 @@ void rg_float()
                 end = true;
                 break;
             }
-            // Is this where the rendering logic lives? This update seems to be where colors get updated.
-            ctrl_pt = get_ctrl_pt(tri, ctrl_pt.t);
+            // This is where we ask for splat colors.
+            ctrl_pt = get_ctrl_pt_complex(tri, ctrl_pt.t, direction);
+            // ctrl_pt = get_ctrl_pt(tri, ctrl_pt.t); // original
             state = update(state, ctrl_pt, tmin, tmax, max_prim_size);
             iter++;
             if (!(state.logT < LOG_CUTOFF && iter < max_iters)) break;
