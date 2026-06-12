@@ -61,6 +61,7 @@ RWStructuredBuffer<float4> initial_drgb;
 float max_prim_size;
 RaytracingAccelerationStructure traversable;
 
+bool use_softplus;
 
 ControlPoint get_ctrl_pt(uint tri, float t) {
     ControlPoint ctrl_pt;
@@ -114,14 +115,16 @@ ControlPoint get_ctrl_pt_complex(uint tri, float t, float3 rayd) {
     let sh_result = eval_color(rayd, feat, sh_feats.max_deg);
 
     // TODO: I believe colors should always be softplussed before being traced with (as done in get_color inside FastRenderer.)
-    // TODO: Add a parameter that lets this softplus be turned off (if this is called with precomputed SHs.)
-    let color = softplus(sh_result, 10);
+    // Softplus result color based on if we're using precomputed SHs or not.
+    // (note that magic number 10 matches the same softplus beta we use in EvalSH)
+    let color = use_softplus ? softplus(sh_result, 10) : sh_result;
 
     ctrl_pt.t = t;
     ctrl_pt.dirac.x = dirac_height;
     ctrl_pt.dirac.y = dirac_height * color.x;
     ctrl_pt.dirac.z = dirac_height * color.y;
     ctrl_pt.dirac.w = dirac_height * color.z;
+
     return ctrl_pt;
 }
 

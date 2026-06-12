@@ -20,18 +20,16 @@
 #include "CUDABuffer.h"
 #include "initialize_density.h"
 
-void Forward::trace_rays(
-    const OptixTraversableHandle &handle,
-    const size_t num_rays, float3 *ray_origins,
-    float3 *ray_directions, void *image_out, uint sh_deg,
-    float tmin, float tmax, float4 *initial_drgb,
-    Cam *camera,
-    const size_t max_iters, 
-    const float max_prim_size,
-    uint *iters, uint *last_face,
-    uint *touch_count,
-    float4 *last_dirac, SplineState *last_state,
-    int *tri_collection, int *d_touch_count, int *d_touch_inds) {
+void Forward::trace_rays(const OptixTraversableHandle& handle,
+                         const size_t num_rays, float3* ray_origins,
+                         float3* ray_directions, void* image_out, uint sh_deg,
+                         float tmin, float tmax, float4* initial_drgb,
+                         Cam* camera, const size_t max_iters,
+                         const float max_prim_size, uint* iters,
+                         uint* last_face, uint* touch_count, float4* last_dirac,
+                         SplineState* last_state, int* tri_collection,
+                         int* d_touch_count, int* d_touch_inds,
+                         const bool use_softplus) {
   CUDA_CHECK(cudaSetDevice(device));
   {
     params.fimage.data = (float4 *)image_out;
@@ -58,6 +56,8 @@ void Forward::trace_rays(
     }
     params.tmin = tmin;
     params.tmax = tmax;
+    // Should be disabled when we use pre-rendered SHs.
+    params.use_softplus = use_softplus;
 
     CUDA_CHECK(cudaMemset(reinterpret_cast<void *>(initial_drgb), 0,
                           num_rays * sizeof(float4)));
@@ -66,7 +66,10 @@ void Forward::trace_rays(
 
     initialize_density(&params, model->aabbs, d_touch_count, d_touch_inds);
 
+    // Guessing this copies the param content to the actual CUDA device from CPU
+    // and updates d_param to properly point to it?
     params.handle = handle;
+
     CUDA_CHECK(cudaMemcpy(reinterpret_cast<void *>(d_param), &params,
                           sizeof(params), cudaMemcpyHostToDevice));
     if (camera != NULL) {

@@ -73,6 +73,7 @@ struct Params
     StructuredBuffer<float4> initial_drgb;
     float max_prim_size;
     OptixTraversableHandle handle;
+    bool use_softplus;
 };
 
 class Forward {
@@ -103,7 +104,8 @@ class Forward {
                     SplineState *last_state=NULL,
                     int *tri_collection=NULL,
                     int *d_touch_count=NULL,
-                    int *d_touch_inds=NULL);
+                    int *d_touch_inds=NULL,
+                    const bool use_softplus=false);
    void reset_features(const Primitives &model);
    bool enable_backward = false;
    size_t num_prims = 0;

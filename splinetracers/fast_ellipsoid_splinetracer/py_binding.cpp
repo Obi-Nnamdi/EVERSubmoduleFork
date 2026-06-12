@@ -213,10 +213,11 @@ public:
     // Reset SH Degree pointer
     sh_degree = sqrt(model.model.feature_size) - 1;
   }
-  py::dict trace_rays(const fesPyGas &gas, const torch::Tensor &ray_origins,
-                      const torch::Tensor &ray_directions, float tmin,
+  py::dict trace_rays(const fesPyGas& gas, const torch::Tensor& ray_origins,
+                      const torch::Tensor& ray_directions, float tmin,
                       float tmax, const size_t max_iters,
-                      const float max_prim_size) {
+                      const float max_prim_size,
+                      const bool use_softplus = false) {
     torch::AutoGradMode enable_grad(false);
     CHECK_FLOAT_DIM3(ray_origins);
     CHECK_FLOAT_DIM3(ray_directions);
@@ -240,22 +241,20 @@ public:
         torch::device(device).dtype(torch::kInt32));
 
     fesSavedForBackward saved_for_backward(num_rays, num_prims, device);
-    forward.trace_rays(gas.gas.gas_handle, num_rays,
-                       reinterpret_cast<float3 *>(ray_origins.data_ptr()),
-                       reinterpret_cast<float3 *>(ray_directions.data_ptr()),
-                       reinterpret_cast<void *>(color.data_ptr()),
-                       sh_degree, tmin, tmax,
-                       reinterpret_cast<float4 *>(initial_drgb.data_ptr()),
-                       NULL,
-                       max_iters, max_prim_size,
-                       saved_for_backward.iters_data_ptr(),
-                       saved_for_backward.faces_data_ptr(),
-                       saved_for_backward.touch_count_data_ptr(),
-                       saved_for_backward.diracs_data_ptr(),
-                       saved_for_backward.states_data_ptr(),
-                       reinterpret_cast<int *>(tri_collection.data_ptr()),
-                       reinterpret_cast<int *>(initial_touch_count.data_ptr()),
-                       reinterpret_cast<int *>(initial_touch_inds.data_ptr()));
+    forward.trace_rays(
+        gas.gas.gas_handle, num_rays,
+        reinterpret_cast<float3*>(ray_origins.data_ptr()),
+        reinterpret_cast<float3*>(ray_directions.data_ptr()),
+        reinterpret_cast<void*>(color.data_ptr()), sh_degree, tmin, tmax,
+        reinterpret_cast<float4*>(initial_drgb.data_ptr()), NULL, max_iters,
+        max_prim_size, saved_for_backward.iters_data_ptr(),
+        saved_for_backward.faces_data_ptr(),
+        saved_for_backward.touch_count_data_ptr(),
+        saved_for_backward.diracs_data_ptr(),
+        saved_for_backward.states_data_ptr(),
+        reinterpret_cast<int*>(tri_collection.data_ptr()),
+        reinterpret_cast<int*>(initial_touch_count.data_ptr()),
+        reinterpret_cast<int*>(initial_touch_inds.data_ptr()), use_softplus);
     return py::dict("color"_a = color,  //_a is the "arg" literal for pybind
                     "saved"_a = saved_for_backward,
                     "tri_collection"_a = tri_collection,
@@ -282,8 +281,10 @@ PYBIND11_MODULE(fast_ellipsoid_splinetracer_cpp_extension, m) {
       py::init<const fesOptixContext &, const torch::Device &,
                const fesPyPrimitives &, const bool, const bool, const bool>());
   py::class_<fesPyForward>(m, "Forward")
-      .def(py::init<const fesOptixContext &, const torch::Device &,
-                    const fesPyPrimitives &, const bool>())
-      .def("trace_rays", &fesPyForward::trace_rays)
+      .def(py::init<const fesOptixContext&, const torch::Device&,
+                    const fesPyPrimitives&, const bool>())
+      .def("trace_rays", &fesPyForward::trace_rays, "gas"_a, "ray_origins"_a,
+           "ray_directions"_a, "tmin"_a, "tmax"_a, "max_iters"_a,
+           "max_prim_size"_a, "use_softplus"_a = false)  // https://pybind11.readthedocs.io/en/stable/basics.html#default-args
       .def("update_model", &fesPyForward::update_model);
 }
