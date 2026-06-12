@@ -44,9 +44,9 @@ void sh_kernel(
     float t = (time_step % frame_loop_time) / ((float) frame_loop_time - 1); // (0 -> 1)
     
     
-    // float3 base_color = eval_color(dir_pp, feat, sh_degree);
+    float3 base_color = eval_color(dir_pp, feat, sh_degree);
     // float3 base_color = {0.878, 0.867, 0.133};
-    float3 base_color = {0, 0, 1};
+    // float3 base_color = {0, 0, 1};
     // float3 base_color = t; // black -> white
 
     // float3 light_dir = { 0, 0, 1 };
@@ -62,7 +62,8 @@ void sh_kernel(
     float3 view_dir = normalize(rayo - mean);
 
     // float3 color = normal_alignment * base_color;
-    float3 color = phong_shade(mean, normal_dir, light_dir, rayo, base_color, 32, 0.04);
+    // float3 color = phong_shade(mean, normal_dir, light_dir, rayo, base_color, 32, 0.04);
+    float3 color = base_color;
     // Debug view of normals:
     // float3 color = (normal_dir / 2) + 0.5; // [0-1] on rgb (xyz)
 
