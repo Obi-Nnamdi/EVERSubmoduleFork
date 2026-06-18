@@ -23,6 +23,15 @@ float3 get_float3(TensorView<float> view, uint ind) {
     };
 }
 
+[Differentiable]
+float3 get_float3(DiffTensorView<float> view, no_diff uint ind) {
+    return {
+        view[ind, 0],
+        view[ind, 1],
+        view[ind, 2]
+    };
+}
+
 half3 get_half3(TensorView<half> view, uint ind) {
     return {
         view[ind, 0],
