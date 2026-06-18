@@ -11,7 +11,7 @@ import tensor_util;
         incoming_light: (P, N, 3) R,G,B values of incoming light for each direction
         incoming_light_dirs: (P, N, 3) Directions oriented towards the light source in world space
         normal: (P, 3) Surface normals in world space for each of P points
-        outgoing_dir: (1, 3) Outgoing (view) direction of radiance, in world space (head at the camera, tip at the surface point)
+        outgoing_directions: (P, 3) Outgoing (view) direction of radiance, in world space (head at the camera, tip at the surface point) for each point.
         diffuse_K: (P, 3)
         specular_K: (P, 3)
         spec_reflect_c: (P,)
@@ -25,7 +25,7 @@ import tensor_util;
 void eval_outgoing_radiance_blinn_phong(
     TensorView<float> incoming_light,
     TensorView<float> incoming_light_dirs,
-    TensorView<float> outgoing_dir,
+    TensorView<float> outgoing_directions,
     DiffTensorView<float> normals,
     DiffTensorView<float> diffuse_K,
     DiffTensorView<float> specular_K,
@@ -52,7 +52,7 @@ void eval_outgoing_radiance_blinn_phong(
     float3 normal = get_float3(normals, point_ind);
     float spec_c = spec_reflect_c[point_ind];
 
-    float3 outgoing_light_dir = no_diff get_float3(outgoing_dir, 0);
+    float3 outgoing_light_dir = no_diff get_float3(outgoing_directions, point_ind);
 
     float3 light_color = no_diff get_float3(incoming_light, point_ind, light_ind);
     float3 light_dir = no_diff get_float3(incoming_light_dirs, point_ind, light_ind); // TODO: Could be reduced from (P, N, 3) -> (N, 3) to save memory
@@ -70,7 +70,7 @@ void eval_outgoing_radiance_blinn_phong(
     float3 diffuse_component = diffuse_term * diffuse_intensity;
 
     // Compute Specular component
-    float3 halfway_vec = normalize(light_dir + outgoing_light_dir);
+    float3 halfway_vec = l2_normalize(light_dir + outgoing_light_dir);
     float specular_term = pow(dot(halfway_vec, normal), spec_c);
 
     float3 specular_intensity = light_color * Ks;
