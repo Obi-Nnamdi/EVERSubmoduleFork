@@ -6,6 +6,7 @@ import tensor_util;
 [Differentiable]
 /**
     Evaluate the given Blinn-Phong BRDFs with the given incoming light, matching each point to its corresponding incoming light.
+    Good code reference: https://en.wikipedia.org/wiki/Blinn%E2%80%93Phong_reflection_model
 
     Inputs:
         incoming_light: (P, N, 3) R,G,B values of incoming light for each direction
@@ -67,11 +68,15 @@ void eval_outgoing_radiance_blinn_phong(
 
     float3 diffuse_intensity = light_color * Kd;
 
+    // NOTE: Diffuse term could be clipped similar to specular, but it should always be less than 1 since light_dir and normal are both normalized before input.
     float3 diffuse_component = diffuse_term * diffuse_intensity;
 
     // Compute Specular component
     float3 halfway_vec = l2_normalize(light_dir + outgoing_light_dir);
-    float specular_term = pow(dot(halfway_vec, normal), spec_c);
+    float half_dot_normal = dot(halfway_vec, normal);
+
+    // TODO: A "gentler" clipping (sigmoid, etc.) might be preferred for gradient propagation
+    float specular_term = pow(saturate(half_dot_normal), spec_c); // clip to within 0 -> 1 range to prevent NaNs.
 
     float3 specular_intensity = light_color * Ks;
     float3 specular_component = specular_term * specular_intensity;
