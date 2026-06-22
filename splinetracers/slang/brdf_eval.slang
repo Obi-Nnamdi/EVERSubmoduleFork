@@ -76,7 +76,8 @@ void eval_outgoing_radiance_blinn_phong(
     float half_dot_normal = dot(halfway_vec, normal);
 
     // TODO: A "gentler" clipping (sigmoid, etc.) might be preferred for gradient propagation
-    float specular_term = pow(saturate(half_dot_normal), spec_c); // clip to within 0 -> 1 range to prevent NaNs.
+    float specular_term = safe_pow_pos_b(saturate(half_dot_normal), spec_c); // clip exponent to within 0 -> 1 range and don't do
+                                                                             // POWs on really small numbers (assuming pos b exponent) to prevent NaNs.
 
     float3 specular_intensity = light_color * Ks;
     float3 specular_component = specular_term * specular_intensity;

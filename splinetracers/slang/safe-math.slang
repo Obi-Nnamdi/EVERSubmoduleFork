@@ -143,6 +143,15 @@ float safe_exp(float v) {
   return exp(clip(v, MIN_VAL, log(MAX_VAL)));
 }
 
+[Differentiable]
+float safe_pow_pos_b(float a, float b) {
+    if (abs(a) < TINY_VAL) {
+        return 0.0;
+    } else {
+        return pow(a, b);
+    }
+}
+
 void bw_log1p(inout DifferentialPair<float> v, float.Differential R) {
   v = DifferentialPair<float>(v.p, safe_div(1, 1+v.p) * R);
 }
