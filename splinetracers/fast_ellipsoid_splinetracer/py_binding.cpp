@@ -12,20 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <iostream>
-#include <memory>
-#include <pybind11/pybind11.h>
-#include <string>
-#include <torch/extension.h>
-
+#include <exception.h>
 #include <optix.h>
 #include <optix_function_table_definition.h>
 #include <optix_stubs.h>
+#include <pybind11/pybind11.h>
+#include <torch/extension.h>
+
+#include <mutex>
 
 #include "Forward.h"
 #include "GAS.h"
 #include "create_aabbs.h"
-#include <exception.h>
+
 //#include "ply_file_loader.h"
 
 namespace py = pybind11;
@@ -60,8 +59,15 @@ using namespace pybind11::literals; // to bring in the `_a` literal
   CHECK_FLOAT(x);                                                              \
   TORCH_CHECK(x.size(-1) == 3, #x " must have last dimension with size 3")
 
+static std::mutex g_mutexLogger;
 static void context_log_cb(unsigned int level, const char *tag,
                            const char *message, void * /*cbdata */) {
+  // Added for debugging:
+  // https://forums.developer.nvidia.com/t/need-help-understanding-why-optixlaunch-is-failing/275372/4
+  std::lock_guard<std::mutex> lock(g_mutexLogger);
+
+  std::cerr << tag << " (" << level
+            << "): " << ((message) ? message : "(no message)") << '\n';
 }
 
 OptixAabb *D_AABBS = 0;
@@ -81,7 +87,9 @@ public:
       // Specify context options
       OptixDeviceContextOptions options = {};
       options.logCallbackFunction = &context_log_cb;
-      options.logCallbackLevel = 4;
+      options.logCallbackLevel = 0;
+      options.logCallbackData = nullptr;
+      // options.validationMode = OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_ALL;
       // Associate a CUDA context (and therefore a specific GPU) with this
       // device context
       CUcontext cuCtx = 0; // zero means take the current context

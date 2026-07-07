@@ -100,8 +100,9 @@ Forward::Forward(const OptixDeviceContext &context, int8_t device,
   {
     pipeline_compile_options.usesMotionBlur = false;
     pipeline_compile_options.traversableGraphFlags =
-        OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
-    pipeline_compile_options.numPayloadValues = 32;
+        OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS |
+        OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING;
+    pipeline_compile_options.numPayloadValues = 0;
     pipeline_compile_options.numAttributeValues = 1;
     pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE;
     pipeline_compile_options.pipelineLaunchParamsVariableName =
@@ -111,10 +112,31 @@ Forward::Forward(const OptixDeviceContext &context, int8_t device,
   }
   OptixModule module = nullptr;
   OptixModule module2 = nullptr;
+  // ---- Semantics matching actual shader usage ----
+  // Raygen        : reads and writes all 32 registers
+  // (TRACE_CALLER_READ_WRITE) Any-hit       : reads and writes all 32 registers
+  // (AH_READ_WRITE) Closest-hit   : body is empty but declares inout payload
+  // (CH_READ_WRITE) Miss          : does not touch payload at all
+  // (MS_NONE) Intersection  : does not touch payload at all (IS_NONE)
+
+  const uint32_t perRegSemantics =
+      OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ_WRITE |
+      OPTIX_PAYLOAD_SEMANTICS_AH_READ_WRITE |
+      OPTIX_PAYLOAD_SEMANTICS_CH_READ_WRITE | OPTIX_PAYLOAD_SEMANTICS_MS_NONE |
+      OPTIX_PAYLOAD_SEMANTICS_IS_NONE;
+
+  std::array<uint32_t, 32> semantics;
+  semantics.fill(perRegSemantics);
+
+  OptixPayloadType payloadType = {};
+  payloadType.numPayloadValues = 32;
+  payloadType.payloadSemantics = semantics.data();
   {
     OptixModuleCompileOptions module_compile_options = {};
     module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_LEVEL_3;
     module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
+    module_compile_options.numPayloadTypes = 1;
+    module_compile_options.payloadTypes = &payloadType;
     size_t inputSize = 0;
     std::string input;
     if (enable_backward) {
@@ -133,6 +155,7 @@ Forward::Forward(const OptixDeviceContext &context, int8_t device,
   //
   {
     OptixProgramGroupOptions program_group_options = {}; // Initialize to zeros
+    program_group_options.payloadType = &payloadType;
     OptixProgramGroupDesc raygen_prog_group_desc = {};   //
     raygen_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
     raygen_prog_group_desc.raygen.module = module;
@@ -190,7 +213,8 @@ Forward::Forward(const OptixDeviceContext &context, int8_t device,
     OPTIX_CHECK(optixPipelineSetStackSize(
         pipeline, direct_callable_stack_size_from_traversal,
         direct_callable_stack_size_from_state, continuation_stack_size,
-        1 // maxTraversableDepth
+        2  // maxTraversableDepth
+        // https://forums.developer.nvidia.com/t/maximum-optix-traversable-graph/83077
         ));
   }
   //

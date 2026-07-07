@@ -38,7 +38,7 @@ class SplineTracer(Function):
     # Note that forward, setup_context, and backward are @staticmethods
     @staticmethod
     def forward(
-        ctx: Any,
+        ctx: Any, # PyTorch Function boilerplate, holds on to things for backwards pass
         mean: torch.Tensor,
         scale: torch.Tensor,
         quat: torch.Tensor,
@@ -64,10 +64,12 @@ class SplineTracer(Function):
         quat = quat.contiguous()
         color = color.contiguous()
         half_attribs = torch.cat([mean, scale, quat], dim=1).half().contiguous()
+        # Links to splinetracers/fast_ellipsoid_splinetracer/py_binding.cpp
         ctx.prims.add_primitives(mean, scale, quat, half_attribs, density, color)
 
         ctx.gas = sp.GAS(otx, ctx.device, ctx.prims, True, False, True)
 
+        # Links to splinetracers/fast_ellipsoid_splinetracer/py_binding.cpp (specifically, "color" is the fimage)
         ctx.forward = sp.Forward(otx, ctx.device, ctx.prims, True)
         st = time.time()
         ctx.max_iters = max_iters
