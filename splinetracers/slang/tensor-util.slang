@@ -56,12 +56,29 @@ float3 get_float3(TensorView<float> view, uint ind, uint feat_ind) {
     };
 }
 
+[Differentiable]
+float3 get_float3(DiffTensorView<float> view, no_diff uint ind, no_diff uint feat_ind) {
+    return {
+        view[ind, feat_ind, 0],
+        view[ind, feat_ind, 1],
+        view[ind, feat_ind, 2]
+    };
+}
+
 float4 get_float4(TensorView<float> view, uint ind) {
     return {
         view[ind, 0],
         view[ind, 1],
         view[ind, 2],
         view[ind, 3]
+    };
+}
+
+float3 get_float3(TensorView<float> view, uint batch_ind, uint ind, uint feat_ind) {
+    return {
+        view[batch_ind, ind, feat_ind, 0],
+        view[batch_ind, ind, feat_ind, 1],
+        view[batch_ind, ind, feat_ind, 2]
     };
 }
 
