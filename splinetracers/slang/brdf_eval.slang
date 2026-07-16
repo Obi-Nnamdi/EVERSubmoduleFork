@@ -123,8 +123,10 @@ void eval_outgoing_radiance_blinn_phong_with_incoming_light_cache(
 {
     // Initial setup
     uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
-    uint batch_ind = dispatchIdx.x;
-    uint point_ind = dispatchIdx.y;
+
+    // Awkward looking that the Batch dim isn't the first dim, but it's to prevent limitations of block size (point dim is by far the largest.)
+    uint batch_ind = dispatchIdx.y;
+    uint point_ind = dispatchIdx.x;
     uint light_ind = dispatchIdx.z;
 
     // Early exit if there's no data to process
