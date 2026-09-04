@@ -2,6 +2,7 @@ import safe_math;
 import tensor_util;
 // Pattern from https://shader-slang.org/slang/docs/user-guide/a1-02-slangpy, section "Specializing shaders using slangtorch"
 static const uint kMaxIncomingLightDirections = MAX_INCOMING_LIGHT_DIRECTIONS_FOR_LOOP_EVAL; // sent from slangtorch's 'defines' call.
+static const uint kMaxOutgoingLightDirections = MAX_OUTGOING_LIGHT_DIRECTIONS_FOR_LOOP_EVAL; // sent from slangtorch's 'defines' call.
 [AutoPyBindCUDA]
 [CUDAKernel]
 [Differentiable]
@@ -245,13 +246,36 @@ void eval_outgoing_radiance_blinn_phong_with_incoming_light_cache_mem_save(
     // Get the index with which we're indexing the "P" dimension of the probe with
     int probe_index = incoming_light_probe_query[batch_ind, point_ind];
 
+    float3 full_color = blinn_phong_eval_rendered_color_from_probe_incoming_light(
+        probe_incoming_light, probe_incoming_light_dirs, probe_index,
+        outgoing_light_dir, Kd, Ks, normal, spec_c
+    );
+
+    output.storeOnce(uint3(batch_ind, point_ind, 0), full_color.r);
+    output.storeOnce(uint3(batch_ind, point_ind, 1), full_color.g);
+    output.storeOnce(uint3(batch_ind, point_ind, 2), full_color.b);
+}
+
+[Differentiable]
+[ForceInline]
+// Evaluate the given Blinn-Phong BRDF with incoming light given by a light probe and its associated index.
+float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
+    TensorView<float> probe_incoming_light,
+    TensorView<float> probe_incoming_light_dirs,
+    no_diff int probe_index,
+    no_diff float3 outgoing_light_dir,
+    float3 Kd,
+    float3 Ks,
+    float3 normal,
+    float spec_c,
+) {
     // Loop over all our incoming light directions and colors
     float3 full_color = { 0, 0, 0 };
     int valid_light_sources = 0;
 
     // [ForceUnroll(kMaxIncomingLightDirections)]
     [MaxIters(kMaxIncomingLightDirections)]
-    for (uint light_ind = 0; light_ind < probe_incoming_light.size(1); light_ind++) {
+    for (no_diff uint light_ind = 0; light_ind < probe_incoming_light.size(1); light_ind++) {
         float3 light_color = no_diff get_float3(probe_incoming_light, probe_index, light_ind);
         float3 light_dir = no_diff get_float3(probe_incoming_light_dirs, light_ind); // Light dir never changes based on the point
         // Compute diffuse component
@@ -286,7 +310,91 @@ void eval_outgoing_radiance_blinn_phong_with_incoming_light_cache_mem_save(
         full_color = safe_div(full_color, valid_light_sources);
     }
 
-    output.storeOnce(uint3(batch_ind, point_ind, 0), full_color.r);
-    output.storeOnce(uint3(batch_ind, point_ind, 1), full_color.g);
-    output.storeOnce(uint3(batch_ind, point_ind, 2), full_color.b);
+    return full_color;
+}
+
+[AutoPyBindCUDA]
+[CUDAKernel]
+[Differentiable]
+/**
+    Evaluate the given Blinn-Phong BRDFs with the given incoming light, matching each point to its corresponding outgoing light.
+    Computes all intermediate light ray contributions within the kernel to save memory.
+    Good code reference: https://en.wikipedia.org/wiki/Blinn%E2%80%93Phong_reflection_model
+
+    Inputs:
+        probe_incoming_light: (P, N, 3) R,G,B values of incoming light for each direction in the light probe
+        probe_incoming_light_dirs: (N, 3) Directions oriented towards the light source in world space (assumed to be the same for each point).
+        probe_outgoing_light: (P, O, 3) R,G,B values of outgoing light for each direction
+        probe_outgoing_light_dirs: (O, 3) All extra outgoing (view) directions of radiance (essentially just reversed probe_incoming_light_dirs)
+                                    Head at the camera, tip at the surface point.
+        light_probe_query: (B, HW) Correspondence between each of the HW points and their probe number.
+        normals: (B, HW, 3) Surface normals in world space for each of HW points
+        diffuse_K: (B, HW, 3)
+        specular_K: (B, HW, 3)
+        spec_reflect_c: (B, HW,)
+
+    Outputs:
+        color_diff: (B, HW, 3) R,G,B values that specify the difference in color between the outgoing light probe and the rendered BRDF colors
+        for each point (specified by Batch Size B and HW), averaged across all the probe outgoing light directions.
+*/
+void eval_outgoing_radiance_at_multiple_directions_with_probe(
+    TensorView<float> probe_incoming_light,
+    TensorView<float> probe_incoming_light_dirs,
+    TensorView<float> probe_outgoing_light,
+    TensorView<float> probe_outgoing_light_dirs,
+    TensorView<int32_t> light_probe_query,
+    DiffTensorView<float> normals,
+    DiffTensorView<float> diffuse_K,
+    DiffTensorView<float> specular_K,
+    DiffTensorView<float> spec_reflect_c,
+    DiffTensorView<float> output,
+)
+{
+    // Initial setup
+    uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
+
+    // Awkward looking that the Batch dim isn't the first dim, but it's to prevent limitations of block size (point dim is by far the largest.)
+    uint batch_ind = dispatchIdx.y;
+    uint point_ind = dispatchIdx.x;
+
+    // Early exit if there's no data to process
+    if (batch_ind >= normals.size(0)) {
+        return;
+    }
+    if (point_ind >= normals.size(1)) {
+        return;
+    }
+
+    // Coerce variables to standard representations
+    float3 Kd = get_float3(diffuse_K, batch_ind, point_ind);
+    float3 Ks = get_float3(specular_K, batch_ind, point_ind);
+    float3 normal = get_float3(normals, batch_ind, point_ind);
+    float spec_c = spec_reflect_c[batch_ind, point_ind];
+
+    // Get the index with which we're indexing the "P" dimension of the probe with
+    int probe_index = light_probe_query[batch_ind, point_ind];
+    int num_outgoing_directions = probe_outgoing_light.size(1);
+
+    // Iteratively compute average color diff between outgoing light directions and outgoing light
+    float3 running_color_diff = { 0, 0, 0 };
+    // [ForceUnroll]
+    [MaxIters(kMaxOutgoingLightDirections)] // Causes CUDA Memory errors...
+    for (no_diff uint outgoing_light_ind = 0; outgoing_light_ind < num_outgoing_directions; outgoing_light_ind++) {
+        float3 outgoing_light_dir = no_diff get_float3(probe_outgoing_light_dirs, outgoing_light_ind);
+        float3 target_color = no_diff get_float3(probe_outgoing_light, probe_index, outgoing_light_ind);
+
+        float3 rendered_color = blinn_phong_eval_rendered_color_from_probe_incoming_light(
+            probe_incoming_light, probe_incoming_light_dirs, probe_index,
+            outgoing_light_dir, Kd, Ks, normal, spec_c
+        );
+
+        float3 color_diff = target_color - rendered_color;
+        running_color_diff += color_diff;
+    }
+
+    // Average across "O" dimension
+    float3 average_color_diff = safe_div(running_color_diff, num_outgoing_directions);
+    output.storeOnce(uint3(batch_ind, point_ind, 0), average_color_diff.r);
+    output.storeOnce(uint3(batch_ind, point_ind, 1), average_color_diff.g);
+    output.storeOnce(uint3(batch_ind, point_ind, 2), average_color_diff.b);
 }
