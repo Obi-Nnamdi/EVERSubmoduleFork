@@ -257,7 +257,6 @@ void eval_outgoing_radiance_blinn_phong_with_incoming_light_cache_mem_save(
 }
 
 [Differentiable]
-[ForceInline]
 // Evaluate the given Blinn-Phong BRDF with incoming light given by a light probe and its associated index.
 float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
     TensorView<float> probe_incoming_light,
@@ -315,7 +314,6 @@ float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
 
 [AutoPyBindCUDA]
 [CUDAKernel]
-[Differentiable]
 /**
     Evaluate the given Blinn-Phong BRDFs with the given incoming light, matching each point to its corresponding outgoing light.
     Computes all intermediate light ray contributions within the kernel to save memory.
@@ -377,11 +375,9 @@ void eval_outgoing_radiance_at_multiple_directions_with_probe(
 
     // Iteratively compute average color diff between outgoing light directions and outgoing light
     float3 running_color_diff = { 0, 0, 0 };
-    // [ForceUnroll]
-    [MaxIters(kMaxOutgoingLightDirections)] // Causes CUDA Memory errors...
-    for (no_diff uint outgoing_light_ind = 0; outgoing_light_ind < num_outgoing_directions; outgoing_light_ind++) {
-        float3 outgoing_light_dir = no_diff get_float3(probe_outgoing_light_dirs, outgoing_light_ind);
-        float3 target_color = no_diff get_float3(probe_outgoing_light, probe_index, outgoing_light_ind);
+    for (uint outgoing_light_ind = 0; outgoing_light_ind < num_outgoing_directions; outgoing_light_ind++) {
+        float3 outgoing_light_dir = get_float3(probe_outgoing_light_dirs, outgoing_light_ind);
+        float3 target_color = get_float3(probe_outgoing_light, probe_index, outgoing_light_ind);
 
         float3 rendered_color = blinn_phong_eval_rendered_color_from_probe_incoming_light(
             probe_incoming_light, probe_incoming_light_dirs, probe_index,
@@ -389,7 +385,7 @@ void eval_outgoing_radiance_at_multiple_directions_with_probe(
         );
 
         float3 color_diff = target_color - rendered_color;
-        running_color_diff += color_diff;
+        running_color_diff += color_diff * color_diff; // add MSE
     }
 
     // Average across "O" dimension
@@ -397,4 +393,94 @@ void eval_outgoing_radiance_at_multiple_directions_with_probe(
     output.storeOnce(uint3(batch_ind, point_ind, 0), average_color_diff.r);
     output.storeOnce(uint3(batch_ind, point_ind, 1), average_color_diff.g);
     output.storeOnce(uint3(batch_ind, point_ind, 2), average_color_diff.b);
+}
+
+[AutoPyBindCUDA]
+[CUDAKernel]
+void eval_outgoing_radiance_at_multiple_directions_with_probe_bwd(
+    TensorView<float> probe_incoming_light,
+    TensorView<float> probe_incoming_light_dirs,
+    TensorView<float> probe_outgoing_light,
+    TensorView<float> probe_outgoing_light_dirs,
+    TensorView<int32_t> light_probe_query,
+    TensorView<float> normals,
+    TensorView<float> normals_grad,
+    TensorView<float> diffuse_K,
+    TensorView<float> diffuse_K_grad,
+    TensorView<float> specular_K,
+    TensorView<float> specular_K_grad,
+    TensorView<float> spec_reflect_c,
+    TensorView<float> spec_reflect_c_grad,
+    TensorView<float> output,
+    TensorView<float> output_grad,
+) {
+    // normals.diff
+    // normals.primal
+    // https://docs.shader-slang.org/en/stable/auto-diff-tutorial-1.html#backward-mode-differentiation
+    // Goal: find [dBRDF/dnormal, dBRDF/dKd, dBRDF/dKs, dBRDF/dspec_c
+
+    // Initial setup
+    uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
+
+    // Awkward looking that the Batch dim isn't the first dim, but it's to prevent limitations of block size (point dim is by far the largest.)
+    uint batch_ind = dispatchIdx.y;
+    uint point_ind = dispatchIdx.x;
+
+    // Early exit if there's no data to process
+    if (batch_ind >= normals.size(0)) {
+        return;
+    }
+    if (point_ind >= normals.size(1)) {
+        return;
+    }
+
+    // RECOMPUTE FORWARD PASS (then multiply by output_grad):
+    // Coerce variables to standard representations
+    float3 Kd = get_float3(diffuse_K, batch_ind, point_ind);
+    float3 Ks = get_float3(specular_K, batch_ind, point_ind);
+    float3 normal = get_float3(normals, batch_ind, point_ind);
+    float spec_c = spec_reflect_c[batch_ind, point_ind];
+
+    // Get the index with which we're indexing the "P" dimension of the probe with
+    int probe_index = light_probe_query[batch_ind, point_ind];
+    int num_outgoing_directions = probe_outgoing_light.size(1);
+
+    // Get current output derivative (dL / dAvg)
+    float3 dL_dAvg = get_float3(output_grad, batch_ind, point_ind);
+
+    // Recompute forward pass to get values to work with
+    for (uint outgoing_light_ind = 0; outgoing_light_ind < num_outgoing_directions; outgoing_light_ind++) {
+        float3 outgoing_light_dir = get_float3(probe_outgoing_light_dirs, outgoing_light_ind);
+        float3 target_color = get_float3(probe_outgoing_light, probe_index, outgoing_light_ind);
+
+        float3 rendered_color = blinn_phong_eval_rendered_color_from_probe_incoming_light(
+            probe_incoming_light, probe_incoming_light_dirs, probe_index,
+            outgoing_light_dir, Kd, Ks, normal, spec_c
+        );
+
+        // Recompute color_diff
+        float3 color_diff = target_color - rendered_color;
+
+        // Compute dAvg / drendered_color_i
+        // = (dAvg / dSum) * (dSum / d(diff^2)) * (d (diff^2) / (d_diff)) * (dDiff / dRendered)
+        float3 dAvgdiff_dRendered = safe_div(-2 * color_diff, num_outgoing_directions);
+        float3 dL_dRendered = dL_dAvg * dAvgdiff_dRendered; // chain rule
+
+        // Compute our effect on each parameter of the rendered color
+        var Kd_diff = diffPair(Kd);
+        var Ks_diff = diffPair(Ks);
+        var normal_diff = diffPair(normal);
+        var spec_c_diff = diffPair(spec_c);
+        bwd_diff(blinn_phong_eval_rendered_color_from_probe_incoming_light)(probe_incoming_light, probe_incoming_light_dirs, probe_index, outgoing_light_dir,
+                                                                            Kd_diff, Ks_diff, normal_diff, spec_c_diff, dL_dRendered);
+
+        // Add these to our derivatives (interlocked add not needed as everything's on one thread)
+        add_float3(normals_grad, batch_ind, point_ind, normal_diff.d);
+        add_float3(diffuse_K_grad, batch_ind, point_ind, Kd_diff.d);
+        add_float3(specular_K_grad, batch_ind, point_ind, Ks_diff.d);
+        spec_reflect_c_grad[uint2(batch_ind, point_ind)] += spec_c_diff.d;
+        // spec_reflect_c_grad[uint2(batch_ind, point_ind)] += dL_dRendered.x;
+        // var temp = 0.;
+        // spec_reflect_c_grad.InterlockedAdd(uint2(batch_ind, point_ind), dL_dRendered.x, temp);
+    }
 }
