@@ -1,8 +1,7 @@
 import safe_math;
 import tensor_util;
-// Pattern from https://shader-slang.org/slang/docs/user-guide/a1-02-slangpy, section "Specializing shaders using slangtorch"
-static const uint kMaxIncomingLightDirections = MAX_INCOMING_LIGHT_DIRECTIONS_FOR_LOOP_EVAL; // sent from slangtorch's 'defines' call.
-static const uint kMaxOutgoingLightDirections = MAX_OUTGOING_LIGHT_DIRECTIONS_FOR_LOOP_EVAL; // sent from slangtorch's 'defines' call.
+import brdf_eval_helpers;
+
 [AutoPyBindCUDA]
 [CUDAKernel]
 [Differentiable]
@@ -256,62 +255,6 @@ void eval_outgoing_radiance_blinn_phong_with_incoming_light_cache_mem_save(
     output.storeOnce(uint3(batch_ind, point_ind, 2), full_color.b);
 }
 
-[Differentiable]
-// Evaluate the given Blinn-Phong BRDF with incoming light given by a light probe and its associated index.
-float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
-    TensorView<float> probe_incoming_light,
-    TensorView<float> probe_incoming_light_dirs,
-    no_diff int probe_index,
-    no_diff float3 outgoing_light_dir,
-    float3 Kd,
-    float3 Ks,
-    float3 normal,
-    float spec_c,
-) {
-    // Loop over all our incoming light directions and colors
-    float3 full_color = { 0, 0, 0 };
-    int valid_light_sources = 0;
-
-    // [ForceUnroll(kMaxIncomingLightDirections)]
-    [MaxIters(kMaxIncomingLightDirections)]
-    for (no_diff uint light_ind = 0; light_ind < probe_incoming_light.size(1); light_ind++) {
-        float3 light_color = no_diff get_float3(probe_incoming_light, probe_index, light_ind);
-        float3 light_dir = no_diff get_float3(probe_incoming_light_dirs, light_ind); // Light dir never changes based on the point
-        // Compute diffuse component
-        float diffuse_term = dot(light_dir, normal);
-
-        // If we're not on the same side of the normal, early exit
-        if (diffuse_term < 0) {
-            continue;
-        }
-        float3 diffuse_intensity = light_color * Kd;
-        // NOTE: Diffuse term could be clipped similar to specular, but it should always be less than 1 since light_dir and normal are both normalized before input.
-        float3 diffuse_component = diffuse_term * diffuse_intensity;
-
-        // Compute Specular component
-        float3 halfway_vec = l2_normalize(light_dir + outgoing_light_dir);
-        float half_dot_normal = dot(halfway_vec, normal);
-
-        // TODO: A "gentler" clipping (sigmoid, etc.) might be preferred for gradient propagation
-        float specular_term = safe_pow_pos_b(saturate(half_dot_normal), spec_c); // clip exponent to within 0 -> 1 range and don't do
-                                                                                 // POWs on really small numbers (assuming pos b exponent) to prevent NaNs.
-
-        float3 specular_intensity = light_color * Ks;
-        float3 specular_component = specular_term * specular_intensity;
-
-        // Accumulate the result and increase the amount of valid light sources.
-        full_color += diffuse_component + specular_component;
-        valid_light_sources++;
-    }
-
-    // Average using the amount of light sources contributing to our full color unless there weren't any (no NaNs), full color is 0
-    if (valid_light_sources > 0) {
-        full_color = safe_div(full_color, valid_light_sources);
-    }
-
-    return full_color;
-}
-
 [AutoPyBindCUDA]
 [CUDAKernel]
 /**
@@ -471,7 +414,7 @@ void eval_outgoing_radiance_at_multiple_directions_with_probe_bwd(
         var Ks_diff = diffPair(Ks);
         var normal_diff = diffPair(normal);
         var spec_c_diff = diffPair(spec_c);
-        bwd_diff(blinn_phong_eval_rendered_color_from_probe_incoming_light)(probe_incoming_light, probe_incoming_light_dirs, probe_index, outgoing_light_dir,
+        bwd_diff(blinn_phong_eval_rendered_color_from_probe_incoming_light_fwd)(probe_incoming_light, probe_incoming_light_dirs, probe_index, outgoing_light_dir,
                                                                             Kd_diff, Ks_diff, normal_diff, spec_c_diff, dL_dRendered);
 
         // Add these to our derivatives (interlocked add not needed as everything's on one thread)
