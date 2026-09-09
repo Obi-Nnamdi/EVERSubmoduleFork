@@ -25,31 +25,16 @@ float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
     for (no_diff uint light_ind = 0; light_ind < probe_incoming_light.size(1); light_ind++) {
         float3 light_color = no_diff get_float3(probe_incoming_light, probe_index, light_ind);
         float3 light_dir = no_diff get_float3(probe_incoming_light_dirs, light_ind); // Light dir never changes based on the point
-        // Compute diffuse component
-        float diffuse_term = dot(light_dir, normal);
 
-        // If we're not on the same side of the normal, early exit
-        if (diffuse_term < 0) {
-            continue;
+        // Evaluate BRDF and track if it's even evaluable for the given lighting direction
+        bool graceful_exit;
+        float3 rendered_color = eval_blinn_phong_brdf_single_lighting_direction(Kd, Ks, normal, spec_c, light_color, light_dir, outgoing_light_dir, graceful_exit);
+
+        // Accumulate the result and increase the amount of valid light sources if we've encountered a proper BRDF.
+        if (graceful_exit) {
+            full_color += rendered_color;
+            valid_light_sources++;
         }
-        float3 diffuse_intensity = light_color * Kd;
-        // NOTE: Diffuse term could be clipped similar to specular, but it should always be less than 1 since light_dir and normal are both normalized before input.
-        float3 diffuse_component = diffuse_term * diffuse_intensity;
-
-        // Compute Specular component
-        float3 halfway_vec = l2_normalize(light_dir + outgoing_light_dir);
-        float half_dot_normal = dot(halfway_vec, normal);
-
-        // TODO: A "gentler" clipping (sigmoid, etc.) might be preferred for gradient propagation
-        float specular_term = safe_pow_pos_b(saturate(half_dot_normal), spec_c); // clip exponent to within 0 -> 1 range and don't do
-                                                                                 // POWs on really small numbers (assuming pos b exponent) to prevent NaNs.
-
-        float3 specular_intensity = light_color * Ks;
-        float3 specular_component = specular_term * specular_intensity;
-
-        // Accumulate the result and increase the amount of valid light sources.
-        full_color += diffuse_component + specular_component;
-        valid_light_sources++;
     }
 
     // Average using the amount of light sources contributing to our full color unless there weren't any (no NaNs), full color is 0
