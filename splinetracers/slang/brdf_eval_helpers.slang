@@ -47,6 +47,10 @@ float3 eval_blinn_phong_brdf_single_lighting_direction(
 #if USE_CHECKPOINTING_FOR_OUTGOING_COLOR_DIFF_BACKWARD_PASS
 #warning "Using a Gradient Checkpointing Version of the Incoming Light Probe Kernel. Requires that there be a strict bound to the number of incoming light directions evaluated at once."
 [Differentiable]
+#else
+// avoid entire function being marked as differentiable and slang compiler getting mad no MaxIters was specified
+[BackwardDerivative(blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd)]
+#endif
 // Evaluate the given Blinn-Phong BRDF with incoming light given by a light probe and its associated index.
 float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
     TensorView<float> probe_incoming_light,
@@ -62,51 +66,10 @@ float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
     float3 full_color = { 0, 0, 0 };
     int valid_light_sources = 0;
 
+    #if USE_CHECKPOINTING_FOR_OUTGOING_COLOR_DIFF_BACKWARD_PASS
     // [ForceUnroll(kMaxIncomingLightDirections)]
     [MaxIters(kMaxIncomingLightDirections)]
-    for (no_diff uint light_ind = 0; light_ind < probe_incoming_light.size(1); light_ind++) {
-        float3 light_color = no_diff get_float3(probe_incoming_light, probe_index, light_ind);
-        float3 light_dir = no_diff get_float3(probe_incoming_light_dirs, light_ind); // Light dir never changes based on the point
-
-        // Evaluate BRDF and track if it's even evaluable for the given lighting direction
-        bool graceful_exit;
-        float3 rendered_color = eval_blinn_phong_brdf_single_lighting_direction(Kd, Ks, normal, spec_c, light_color, light_dir, outgoing_light_dir, graceful_exit);
-
-        // Accumulate the result and increase the amount of valid light sources if we've encountered a proper BRDF.
-        if (graceful_exit) {
-            full_color += rendered_color;
-            valid_light_sources++;
-        }
-    }
-
-    // Average using the amount of light sources contributing to our full color unless there weren't any (no NaNs), full color is 0
-    if (valid_light_sources > 0) {
-        full_color = safe_div(full_color, valid_light_sources);
-    }
-
-    return full_color;
-}
-
-#else
-
-[BackwardDerivative(blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd)]
-// Evaluate the given Blinn-Phong BRDF with incoming light given by a light probe and its associated index.
-// Uses custom derivative that forces recomputation of incoming light parameters.
-float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
-    TensorView<float> probe_incoming_light,
-    TensorView<float> probe_incoming_light_dirs,
-    no_diff int probe_index,
-    no_diff float3 outgoing_light_dir,
-    float3 Kd,
-    float3 Ks,
-    float3 normal,
-    float spec_c,
-) {
-    // Loop over all our incoming light directions and colors
-    float3 full_color = { 0, 0, 0 };
-    int valid_light_sources = 0;
-
-    // Loop doesn't need MaxIterations specifier
+    #endif
     for (no_diff uint light_ind = 0; light_ind < probe_incoming_light.size(1); light_ind++) {
         float3 light_color = no_diff get_float3(probe_incoming_light, probe_index, light_ind);
         float3 light_dir = no_diff get_float3(probe_incoming_light_dirs, light_ind); // Light dir never changes based on the point
@@ -203,5 +166,3 @@ void blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd(
     normal = diffPair(normal.p, safe_div(normal.d, valid_light_sources));
     spec_c = diffPair(spec_c.p, safe_div(spec_c.d, valid_light_sources));
 }
-
-#endif
