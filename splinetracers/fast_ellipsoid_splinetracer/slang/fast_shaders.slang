@@ -87,7 +87,7 @@ ControlPoint get_ctrl_pt_complex(uint tri, float t, float3 rayd) {
     ControlPoint ctrl_pt;
     let prim_ind = tri / 2;
     let hitkind = tri % 2;
-    let height = heights[prim_ind];
+    let height = heights[prim_ind]; // TODO: Assuming that this is the "density" of the ellipse?
     let dirac_height = height * ((hitkind == 1) ? 1 : -1);
     Features feat;
     SHFeatures sh_feats = { prim_ind, sh_degree, features };

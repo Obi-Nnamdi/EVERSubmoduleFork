@@ -357,10 +357,8 @@ void eval_outgoing_radiance_at_multiple_directions_with_probe_bwd(
     TensorView<float> output,
     TensorView<float> output_grad,
 ) {
-    // normals.diff
-    // normals.primal
     // https://docs.shader-slang.org/en/stable/auto-diff-tutorial-1.html#backward-mode-differentiation
-    // Goal: find [dBRDF/dnormal, dBRDF/dKd, dBRDF/dKs, dBRDF/dspec_c
+    // Goal: find [dOutput/dnormal, dOutput/dKd, dOutput/dKs, dOutput/dSpec_c]
 
     // Initial setup
     uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
