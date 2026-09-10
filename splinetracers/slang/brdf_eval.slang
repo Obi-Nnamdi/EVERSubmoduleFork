@@ -412,7 +412,7 @@ void eval_outgoing_radiance_at_multiple_directions_with_probe_bwd(
         var Ks_diff = diffPair(Ks);
         var normal_diff = diffPair(normal);
         var spec_c_diff = diffPair(spec_c);
-        bwd_diff(blinn_phong_eval_rendered_color_from_probe_incoming_light_fwd)(probe_incoming_light, probe_incoming_light_dirs, probe_index, outgoing_light_dir,
+        bwd_diff(blinn_phong_eval_rendered_color_from_probe_incoming_light)(probe_incoming_light, probe_incoming_light_dirs, probe_index, outgoing_light_dir,
                                                                             Kd_diff, Ks_diff, normal_diff, spec_c_diff, dL_dRendered);
 
         // Add these to our derivatives (interlocked add not needed as everything's on one thread)
@@ -420,8 +420,5 @@ void eval_outgoing_radiance_at_multiple_directions_with_probe_bwd(
         add_float3(diffuse_K_grad, batch_ind, point_ind, Kd_diff.d);
         add_float3(specular_K_grad, batch_ind, point_ind, Ks_diff.d);
         spec_reflect_c_grad[uint2(batch_ind, point_ind)] += spec_c_diff.d;
-        // spec_reflect_c_grad[uint2(batch_ind, point_ind)] += dL_dRendered.x;
-        // var temp = 0.;
-        // spec_reflect_c_grad.InterlockedAdd(uint2(batch_ind, point_ind), dL_dRendered.x, temp);
     }
 }

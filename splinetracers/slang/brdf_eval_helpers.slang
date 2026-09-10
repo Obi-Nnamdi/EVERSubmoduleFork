@@ -4,6 +4,48 @@ import tensor_util;
 // Pattern from https://shader-slang.org/slang/docs/user-guide/a1-02-slangpy, section "Specializing shaders using slangtorch"
 static const uint kMaxIncomingLightDirections = MAX_INCOMING_LIGHT_DIRECTIONS_FOR_LOOP_EVAL; // sent from slangtorch's 'defines' call.
 
+// Blinn-Phong BRDF Eval using a single colored directional light and observer direction.
+[Differentiable]
+[BackwardDifferentiable]
+float3 eval_blinn_phong_brdf_single_lighting_direction(
+    float3 Kd, float3 Ks, float3 normal, float spec_c,
+    no_diff float3 light_color, no_diff float3 light_dir, no_diff float3 outgoing_light_dir,
+    out bool graceful_exit)
+{
+    graceful_exit = false;
+    // Compute diffuse component
+    float diffuse_term = dot(light_dir, normal);
+    
+    // If we're not on the same side of the normal, early exit
+    if (diffuse_term < 0) {
+        return {0, 0, 0};
+    }
+    float3 diffuse_intensity = light_color * Kd;
+
+    // NOTE: Diffuse term could be clipped similar to specular, but it should always be less than 1 since light_dir and normal are both normalized before input.
+    float3 diffuse_component = diffuse_term * diffuse_intensity;
+
+    // Compute Specular component
+    float3 halfway_vec = l2_normalize(light_dir + outgoing_light_dir);
+    float half_dot_normal = dot(halfway_vec, normal);
+
+    // TODO: A "gentler" clipping (sigmoid, etc.) might be preferred for gradient propagation
+    float specular_term = safe_pow_pos_b(saturate(half_dot_normal), spec_c); // clip exponent to within 0 -> 1 range and don't do
+                                                                             // POWs on really small numbers (assuming pos b exponent) to prevent NaNs.
+
+    float3 specular_intensity = light_color * Ks;
+    float3 specular_component = specular_term * specular_intensity;
+
+    // Normal Return.
+    graceful_exit = true;
+    return diffuse_component + specular_component;
+}
+
+// Two different versions of the evaluation function.
+// One uses gradient checkpointing with MaxIters, another uses
+// recomputation.
+#if USE_CHECKPOINTING_FOR_OUTGOING_COLOR_DIFF_BACKWARD_PASS
+#warning "Using a Gradient Checkpointing Version of the Incoming Light Probe Kernel. Requires that there be a strict bound to the number of incoming light directions evaluated at once."
 [Differentiable]
 // Evaluate the given Blinn-Phong BRDF with incoming light given by a light probe and its associated index.
 float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
@@ -45,48 +87,12 @@ float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
     return full_color;
 }
 
-// Blinn-Phong BRDF Eval using a single colored directional light and observer direction.
-[Differentiable]
-[BackwardDifferentiable]
-float3 eval_blinn_phong_brdf_single_lighting_direction(
-    float3 Kd, float3 Ks, float3 normal, float spec_c,
-    no_diff float3 light_color, no_diff float3 light_dir, no_diff float3 outgoing_light_dir,
-    out bool graceful_exit)
-{
-    graceful_exit = false;
-    // Compute diffuse component
-    float diffuse_term = dot(light_dir, normal);
-    
-    // If we're not on the same side of the normal, early exit
-    if (diffuse_term < 0) {
-        return {0, 0, 0};
-    }
-    float3 diffuse_intensity = light_color * Kd;
-
-    // NOTE: Diffuse term could be clipped similar to specular, but it should always be less than 1 since light_dir and normal are both normalized before input.
-    float3 diffuse_component = diffuse_term * diffuse_intensity;
-
-    // Compute Specular component
-    float3 halfway_vec = l2_normalize(light_dir + outgoing_light_dir);
-    float half_dot_normal = dot(halfway_vec, normal);
-
-    // TODO: A "gentler" clipping (sigmoid, etc.) might be preferred for gradient propagation
-    float specular_term = safe_pow_pos_b(saturate(half_dot_normal), spec_c); // clip exponent to within 0 -> 1 range and don't do
-                                                                             // POWs on really small numbers (assuming pos b exponent) to prevent NaNs.
-
-    float3 specular_intensity = light_color * Ks;
-    float3 specular_component = specular_term * specular_intensity;
-
-    // Normal Return.
-    graceful_exit = true;
-    return diffuse_component + specular_component;
-}
-
+#else
 
 [BackwardDerivative(blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd)]
 // Evaluate the given Blinn-Phong BRDF with incoming light given by a light probe and its associated index.
-// Uses custom derivative.
-float3 blinn_phong_eval_rendered_color_from_probe_incoming_light_fwd(
+// Uses custom derivative that forces recomputation of incoming light parameters.
+float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
     TensorView<float> probe_incoming_light,
     TensorView<float> probe_incoming_light_dirs,
     no_diff int probe_index,
@@ -197,3 +203,5 @@ void blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd(
     normal = diffPair(normal.p, safe_div(normal.d, valid_light_sources));
     spec_c = diffPair(spec_c.p, safe_div(spec_c.d, valid_light_sources));
 }
+
+#endif
