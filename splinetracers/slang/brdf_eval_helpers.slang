@@ -44,7 +44,7 @@ float3 eval_blinn_phong_brdf_single_lighting_direction(
 // Two different versions of the evaluation function.
 // One uses gradient checkpointing with MaxIters, another uses
 // recomputation.
-#if USE_CHECKPOINTING_FOR_OUTGOING_COLOR_DIFF_BACKWARD_PASS
+#if USE_CHECKPOINTING_FOR_INCOMING_LIGHT_PROBE_BACKWARD_PASS
 #warning "Using a Gradient Checkpointing Version of the Incoming Light Probe Kernel. Requires that there be a strict bound to the number of incoming light directions evaluated at once."
 [Differentiable]
 #else
@@ -66,7 +66,7 @@ float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
     float3 full_color = { 0, 0, 0 };
     int valid_light_sources = 0;
 
-    #if USE_CHECKPOINTING_FOR_OUTGOING_COLOR_DIFF_BACKWARD_PASS
+    #if USE_CHECKPOINTING_FOR_INCOMING_LIGHT_PROBE_BACKWARD_PASS
     // [ForceUnroll(kMaxIncomingLightDirections)]
     [MaxIters(kMaxIncomingLightDirections)]
     #endif
@@ -93,6 +93,8 @@ float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
     return full_color;
 }
 
+// Only used when USE_CHECKPOINTING_FOR_INCOMING_LIGHT_PROBE_BACKWARD_PASS is False.
+// Custom derivative that recomputes some aspects of the incoming light calculations.
 void blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd(
     TensorView<float> probe_incoming_light,
     TensorView<float> probe_incoming_light_dirs,
