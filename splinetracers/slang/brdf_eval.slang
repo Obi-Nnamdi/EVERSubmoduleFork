@@ -276,7 +276,7 @@ void eval_outgoing_radiance_blinn_phong_with_incoming_light_cache_mem_save(
 
     Outputs:
         color_diff: (B, HW, 3) R,G,B values that specify the difference in color between the outgoing light probe and the rendered BRDF colors
-        for each point (specified by Batch Size B and HW), averaged across all the probe outgoing light directions.
+        for each point (specified by Batch Size B and HW), summed across all the probe outgoing light directions.
 */
 void eval_outgoing_radiance_at_multiple_directions_with_probe(
     TensorView<float> probe_incoming_light,
@@ -331,11 +331,9 @@ void eval_outgoing_radiance_at_multiple_directions_with_probe(
         running_color_diff += color_diff * color_diff; // add MSE
     }
 
-    // Average across "O" dimension
-    float3 average_color_diff = safe_div(running_color_diff, num_outgoing_directions);
-    output.storeOnce(uint3(batch_ind, point_ind, 0), average_color_diff.r);
-    output.storeOnce(uint3(batch_ind, point_ind, 1), average_color_diff.g);
-    output.storeOnce(uint3(batch_ind, point_ind, 2), average_color_diff.b);
+    output.storeOnce(uint3(batch_ind, point_ind, 0), running_color_diff.r);
+    output.storeOnce(uint3(batch_ind, point_ind, 1), running_color_diff.g);
+    output.storeOnce(uint3(batch_ind, point_ind, 2), running_color_diff.b);
 }
 
 [AutoPyBindCUDA]
@@ -386,8 +384,8 @@ void eval_outgoing_radiance_at_multiple_directions_with_probe_bwd(
     int probe_index = light_probe_query[batch_ind, point_ind];
     int num_outgoing_directions = probe_outgoing_light.size(1);
 
-    // Get current output derivative (dL / dAvg)
-    float3 dL_dAvg = get_float3(output_grad, batch_ind, point_ind);
+    // Get current output derivative (dL / dOutput)
+    float3 dL_dOutput = get_float3(output_grad, batch_ind, point_ind);
 
     // Recompute forward pass to get values to work with
     for (uint outgoing_light_ind = 0; outgoing_light_ind < num_outgoing_directions; outgoing_light_ind++) {
@@ -402,10 +400,10 @@ void eval_outgoing_radiance_at_multiple_directions_with_probe_bwd(
         // Recompute color_diff
         float3 color_diff = target_color - rendered_color;
 
-        // Compute dAvg / drendered_color_i
-        // = (dAvg / dSum) * (dSum / d(diff^2)) * (d (diff^2) / (d_diff)) * (dDiff / dRendered)
-        float3 dAvgdiff_dRendered = safe_div(-2 * color_diff, num_outgoing_directions);
-        float3 dL_dRendered = dL_dAvg * dAvgdiff_dRendered; // chain rule
+        // Compute dSum / drendered_color_i
+        // = (dSum / d(diff^2)) * (d (diff^2) / (d_diff)) * (dDiff / dRendered)
+        float3 dOutput_dRendered = -2 * color_diff;
+        float3 dL_dRendered = dL_dOutput * dOutput_dRendered; // chain rule
 
         // Compute our effect on each parameter of the rendered color
         var Kd_diff = diffPair(Kd);
