@@ -6,7 +6,6 @@ static const uint kMaxIncomingLightDirections = MAX_INCOMING_LIGHT_DIRECTIONS_FO
 
 // Blinn-Phong BRDF Eval using a single colored directional light and observer direction.
 [Differentiable]
-[BackwardDifferentiable]
 float3 eval_blinn_phong_brdf_single_lighting_direction(
     float3 Kd, float3 Ks, float3 normal, float spec_c,
     no_diff float3 light_color, no_diff float3 light_dir, no_diff float3 outgoing_light_dir,
@@ -15,10 +14,11 @@ float3 eval_blinn_phong_brdf_single_lighting_direction(
     graceful_exit = false;
     // Compute diffuse component
     float diffuse_term = dot(light_dir, normal);
-    
+
     // If we're not on the same side of the normal, early exit
-    if (diffuse_term < 0) {
-        return {0, 0, 0};
+    if (diffuse_term < 0)
+    {
+        return { 0, 0, 0 };
     }
     float3 diffuse_intensity = light_color * Kd;
 
@@ -30,14 +30,15 @@ float3 eval_blinn_phong_brdf_single_lighting_direction(
     float half_dot_normal = dot(halfway_vec, normal);
 
     // TODO: A "gentler" clipping (sigmoid, etc.) might be preferred for gradient propagation
-    float specular_term = safe_pow_pos_b(saturate(half_dot_normal), spec_c); // clip exponent to within 0 -> 1 range and don't do
-                                                                             // POWs on really small numbers (assuming pos b exponent) to prevent NaNs.
+    float specular_term = safe_pow_pos_b(saturate(half_dot_normal), max(spec_c, 0.0)); // clip exponent to within 0 -> 1 range and don't do
+                                                                                       // POWs on really small numbers (assuming pos b exponent) to prevent NaNs.
 
     float3 specular_intensity = light_color * Ks;
     float3 specular_component = specular_term * specular_intensity;
 
     // Normal Return.
     graceful_exit = true;
+
     return diffuse_component + specular_component;
 }
 
@@ -60,17 +61,18 @@ float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
     float3 Kd,
     float3 Ks,
     float3 normal,
-    float spec_c,
-) {
+    float spec_c, )
+{
     // Loop over all our incoming light directions and colors
     float3 full_color = { 0, 0, 0 };
     int valid_light_sources = 0;
 
-    #if USE_CHECKPOINTING_FOR_INCOMING_LIGHT_PROBE_BACKWARD_PASS
+#if USE_CHECKPOINTING_FOR_INCOMING_LIGHT_PROBE_BACKWARD_PASS
     // [ForceUnroll(kMaxIncomingLightDirections)]
     [MaxIters(kMaxIncomingLightDirections)]
-    #endif
-    for (no_diff uint light_ind = 0; light_ind < probe_incoming_light.size(1); light_ind++) {
+#endif
+    for (no_diff uint light_ind = 0; light_ind < probe_incoming_light.size(1); light_ind++)
+    {
         float3 light_color = no_diff get_float3(probe_incoming_light, probe_index, light_ind);
         float3 light_dir = no_diff get_float3(probe_incoming_light_dirs, light_ind); // Light dir never changes based on the point
 
@@ -79,14 +81,16 @@ float3 blinn_phong_eval_rendered_color_from_probe_incoming_light(
         float3 rendered_color = eval_blinn_phong_brdf_single_lighting_direction(Kd, Ks, normal, spec_c, light_color, light_dir, outgoing_light_dir, graceful_exit);
 
         // Accumulate the result and increase the amount of valid light sources if we've encountered a proper BRDF.
-        if (graceful_exit) {
+        if (graceful_exit)
+        {
             full_color += rendered_color;
             valid_light_sources++;
         }
     }
 
     // Average using the amount of light sources contributing to our full color unless there weren't any (no NaNs), full color is 0
-    if (valid_light_sources > 0) {
+    if (valid_light_sources > 0)
+    {
         full_color = safe_div(full_color, valid_light_sources);
     }
 
@@ -104,12 +108,13 @@ void blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd(
     inout DifferentialPair<float3> Ks,
     inout DifferentialPair<float3> normal,
     inout DifferentialPair<float> spec_c,
-    float3 dLdOutput
-) {
+    float3 dLdOutput)
+{
     // Partially Recompute forward pass (no checkpointing)
     int valid_light_sources = 0;
 
-    for (uint light_ind = 0; light_ind < probe_incoming_light.size(1); light_ind++) {
+    for (uint light_ind = 0; light_ind < probe_incoming_light.size(1); light_ind++)
+    {
         float3 light_color = get_float3(probe_incoming_light, probe_index, light_ind);
         float3 light_dir = get_float3(probe_incoming_light_dirs, light_ind); // Light dir never changes based on the point
 
@@ -120,7 +125,8 @@ void blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd(
         // light_color, light_dir, outgoing_light_dir, valid_brdf);
 
         // Accumulate the result and increase the amount of valid light sources if we've encountered a proper BRDF.
-        if (valid_brdf) {
+        if (valid_brdf)
+        {
             valid_light_sources++;
 
             // Gradients updated this way to prevent overwriting.
@@ -129,10 +135,10 @@ void blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd(
             DifferentialPair<float3> temp_normal = diffPair(normal.p);
             DifferentialPair<float> temp_spec_c = diffPair(spec_c.p);
             float3 dSumdBRDF = { 1.0, 1.0, 1.0 }; // Always 1 (no weighted average/sum)
-            
+
             // Calculate the gradients dBRDF(light_i) / dComponent
             bwd_diff(eval_blinn_phong_brdf_single_lighting_direction)(temp_Kd, temp_Ks, temp_normal, temp_spec_c,
-                light_color, light_dir, outgoing_light_dir, dSumdBRDF * dLdOutput);
+                                                                      light_color, light_dir, outgoing_light_dir, dSumdBRDF * dLdOutput);
 
             // Update gradients
             Kd = diffPair(Kd.p, Kd.d + temp_Kd.d);
@@ -143,12 +149,13 @@ void blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd(
     }
 
     // If no valid output was generated, there is no gradient
-    if (valid_light_sources == 0) {
+    if (valid_light_sources == 0)
+    {
         Kd = diffPair(Kd.p, { 0, 0, 0 });
         Ks = diffPair(Ks.p, { 0, 0, 0 });
         normal = diffPair(normal.p, { 0, 0, 0 });
         spec_c = diffPair(spec_c.p, 0.);
-        
+
         return;
     }
 
@@ -160,7 +167,7 @@ void blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd(
     // e.g: (Note that Average == Output from forward pass)
     // dL / dKd = (dL/dAverage) * (dAverage/dSum) * (dSum/dKd)
     //              { (yes) }       { (no) }        { (yes) }
-    // 
+    //
     // where dAverage / dSum = 1 / valid_light_sources
 
     Kd = diffPair(Kd.p, safe_div(Kd.d, valid_light_sources));
@@ -168,3 +175,5 @@ void blinn_phong_eval_rendered_color_from_probe_incoming_light_bwd(
     normal = diffPair(normal.p, safe_div(normal.d, valid_light_sources));
     spec_c = diffPair(spec_c.p, safe_div(spec_c.d, valid_light_sources));
 }
+
+// TODO: Create SH evaluation version of incoming light eval
