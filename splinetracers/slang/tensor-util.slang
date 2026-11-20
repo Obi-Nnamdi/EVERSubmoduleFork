@@ -119,6 +119,12 @@ void set_float3(TensorView<float> view, uint ind,  float3 val) {
     view[uint2(ind, 2u)] = val.z;
 }
 
+void set_float3(TensorView<float> view, uint ind, uint feat_ind, float3 val) {
+    view[uint3(ind, feat_ind, 0u)] = val.x;
+    view[uint3(ind, feat_ind, 1u)] = val.y;
+    view[uint3(ind, feat_ind, 2u)] = val.z;
+}
+
 void atomic_add_float3(TensorView<float> view, uint ind, float3 val) {
     float temp;
     view.InterlockedAdd(uint2(ind, 0u), val.x, temp);

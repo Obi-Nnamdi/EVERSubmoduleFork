@@ -7,6 +7,13 @@ import sh;
 /**
     Intersect a group of rays with a sphere,
     returning the t_min of each ray that hits it (and the normal)
+
+    ray_origins: N x 3
+    ray_directions: N x 3
+    sphere_center: MUST be (3 x 1) or (1 x 3)
+    T_values: N x 1
+
+    from https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes//ray-sphere-intersection.html
 */
 void intersect_sphere(
     TensorView<float> ray_origins,
@@ -121,4 +128,69 @@ void bounce_off_sphere(
     // Populate tensor values
     set_float3(bounce_ray_origins, pixel_ind, hit_pos);
     set_float3(bounce_ray_directions, pixel_ind, bounce_d);
+}
+
+[AutoPyBindCUDA]
+[CUDAKernel]
+/**
+    Gather incoming light for points on a sphere assuming that there's a single directional light source that has a single color.
+
+    Incoming light falls off as the incoming light query direction differs from it.
+    Also note: no self-shadowing, but directions pointing inside the sphere are "cut off"
+
+    sphere_query_positions: (N x 3) of xyz positions we're asking to get incoming light on the sphere
+    incoming_light_directions: (R x 3) of directions to query incoming light at, pointing *towards* the light and away from the sphere
+    sphere_center: sphere center in world-space xyz
+    light_direction: light direction in world-space, pointing towards the sphere
+    light_color: rgb color for incoming light (multiplies resulting incoming light)
+    output: (N, R, 3) incoming light colors
+*/
+void gather_incoming_light_for_sphere_using_directional_light(
+    TensorView<float> sphere_query_positions,
+    TensorView<float> incoming_light_directions,
+    float3 sphere_center,
+    float3 light_direction,
+    float3 light_color,
+    TensorView<float> output
+) {
+    // Initial setup
+    uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
+    uint point_ind = dispatchIdx.x;
+    uint light_ind = dispatchIdx.y;
+
+    // Coerce variables to standard representations
+    if (point_ind >= sphere_query_positions.size(0)) {
+        return;
+    }
+    if (light_ind >= incoming_light_directions.size(0)) {
+        return;
+    }
+
+    float3 hit_pos = get_float3(sphere_query_positions, point_ind);
+    float3 incoming_light_dir = get_float3(incoming_light_directions, light_ind);
+
+    // Don't handle inf hit_positions that came from having inf t-values
+    if (any(isinf(hit_pos))) {
+        return;
+    }
+
+    // sphere normal calculation
+    float3 hit_normal = normalize(hit_pos - sphere_center);
+
+    // Only consider incoming light values for positive hemisphere points (automatically 0 otherwise)
+    float normal_term = dot(incoming_light_dir, hit_normal);
+    if (normal_term < 0) {
+        set_float3(output, point_ind, light_ind, { 0, 0, 0 });
+        return;
+    }
+
+    // Want our incoming light direction to be in the opposite direction of our light for max activation (light points towards sphere, incoming light dir points away)
+    float3 opposite_light_dir = -light_direction;
+    // How "oriented" are we towards the directional light?
+    float light_falloff_term = saturate(dot(incoming_light_dir, opposite_light_dir)); // clamped [0, 1]
+
+    float3 incoming_light_color = light_falloff_term * light_color;
+
+    // TODO: this tensor could be big, could use a uint64 accessor
+    set_float3(output, point_ind, light_ind, incoming_light_color);
 }
